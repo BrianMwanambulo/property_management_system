@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1046095092605",
+    "project_id": "chililabombwe-pms",
+    "storage_bucket": "chililabombwe-pms.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1046095092605:android:c3ea0ceceb801ec2a78a14",
+        "android_client_info": {
+          "package_name": "com.pms.property_management_system"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDJK48e3YYTzeDfLxMITqCHPt85o9gPeIo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
