@@ -26,18 +26,20 @@ class UserModel {
       name: data['name'] ?? '',
       phone: data['phone'] ?? '',
       role: data['role'] ?? 'property_owner',
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
+      createdAt:
+          DateTime.tryParse(data['createdAt'].toString()) ?? DateTime.now(),
       isActive: data['isActive'] ?? true,
     );
   }
 
   Map<String, dynamic> toFirestore() {
     return {
+      'uid': uid,
       'email': email,
       'name': name,
       'phone': phone,
       'role': role,
-      'createdAt': Timestamp.fromDate(createdAt),
+      'createdAt': createdAt.toIso8601String(),
       'isActive': isActive,
     };
   }

@@ -1,6 +1,11 @@
+import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 import 'package:flutter/material.dart';
+import 'package:property_management_system/api/local_storage.dart';
+import 'package:property_management_system/api/sync_service.dart';
+import 'package:property_management_system/models/user_model.dart';
 import 'package:property_management_system/providers/auth_provider.dart';
 import 'package:property_management_system/screens/auth/sign_up.dart';
+import 'package:property_management_system/widgets/offline-indicator.dart';
 import 'package:provider/provider.dart';
 
 import '../main_screen.dart';
@@ -25,22 +30,47 @@ class _LoginScreenState extends State<LoginScreen> {
 
       try {
         final authProvider = Provider.of<AuthProvider>(context, listen: false);
-        final success = await authProvider.signIn(
-          _emailController.text.trim(),
-          _passwordController.text.trim(),
-        );
+        final syncService = context.read<SyncService>();
+        bool success = false;
+        if (syncService.isOnline) {
+          success = await authProvider.signIn(
+            _emailController.text.trim(),
+            _passwordController.text.trim(),
+          );
+        } else {
+          success = SharedPreferencesService.authenticateUser(
+            _emailController.text.trim(),
+            _passwordController.text,
+          );
+        }
 
         if (success && mounted) {
+          if (!syncService.isOnline) {
+            final user = UserModel.fromFirestore(
+              SharedPreferencesService.getUserData() ?? {},
+              FirebaseAuth.instance.currentUser?.uid ?? "",
+            );
+            authProvider.user = user;
+
+          }
+          SharedPreferencesService.saveAuthDetails({
+            'email': _emailController.text.trim(),
+            'password': _passwordController.text.trim(),
+          });
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (context) => const MainScreen()),
           );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Incorrect email or password")),
+          );
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.toString())),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(e.toString())));
         }
       } finally {
         if (mounted) {
@@ -61,6 +91,7 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                OfflineIndicator(),
                 const SizedBox(height: 60),
                 Container(
                   width: 80,
@@ -87,10 +118,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 8),
                 Text(
                   'Sign in to your Property Management account',
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.grey[600],
-                  ),
+                  style: TextStyle(fontSize: 16, color: Colors.grey[600]),
                 ),
                 const SizedBox(height: 40),
                 TextFormField(
@@ -122,7 +150,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     prefixIcon: const Icon(Icons.lock_outline),
                     suffixIcon: IconButton(
                       icon: Icon(
-                        _isPasswordVisible ? Icons.visibility : Icons.visibility_off,
+                        _isPasswordVisible
+                            ? Icons.visibility
+                            : Icons.visibility_off,
                       ),
                       onPressed: () {
                         setState(() {
@@ -149,13 +179,15 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: _isLoading ? null : _login,
                   child: _isLoading
                       ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                    ),
-                  )
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.white,
+                            ),
+                          ),
+                        )
                       : const Text('Sign In', style: TextStyle(fontSize: 16)),
                 ),
                 const SizedBox(height: 16),
@@ -163,9 +195,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: _isLoading
                       ? null
                       : () {
-                    // Implement forgot password
-                    // You can add forgot password functionality here
-                  },
+                          // Implement forgot password
+                          // You can add forgot password functionality here
+                        },
                   child: const Text('Forgot Password?'),
                 ),
                 const SizedBox(height: 32),
@@ -191,7 +223,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
+                      SelectableText(
                         'Email: demo@chililabombwe.gov.zm\nPassword: demo123',
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.blue[700]),
@@ -199,11 +231,16 @@ class _LoginScreenState extends State<LoginScreen> {
                     ],
                   ),
                 ),
-                TextButton(onPressed: _isLoading
-                    ? null
-                    :(){
-                  Navigator.of(context).pushReplacement(MaterialPageRoute(builder:(_)=> SignUpScreen(),),);
-                }, child: Text("Create Account"),),
+                TextButton(
+                  onPressed: _isLoading
+                      ? null
+                      : () {
+                          Navigator.of(context).pushReplacement(
+                            MaterialPageRoute(builder: (_) => SignUpScreen()),
+                          );
+                        },
+                  child: Text("Create Account"),
+                ),
               ],
             ),
           ),

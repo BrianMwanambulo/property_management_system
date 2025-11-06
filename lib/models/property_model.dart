@@ -42,15 +42,17 @@ class PropertyModel {
       ownerUid: data['ownerUid'] ?? '',
       ownerName: data['ownerName'] ?? '',
       tenantId: data['tenantId'],
-      tenant: data['tenant'] != null? UserModel.fromFirestore(data['tenant'],data['tenantId']):null,
+      tenant: data['tenant'] != null
+          ? UserModel.fromFirestore(data['tenant'], data['tenantId'])
+          : null,
       address: data['address'] ?? '',
       type: data['type'] ?? 'commercial',
       monthlyRent: (data['monthlyRent'] ?? 0).toDouble(),
       isOccupied: data['isOccupied'] ?? false,
       location: data['location'],
       images: List<String>.from(data['images'] ?? []),
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
-      lastUpdated: (data['lastUpdated'] as Timestamp).toDate(),
+      createdAt: DateTime.tryParse(data['createdAt'].toString()) ?? DateTime.now(),
+      lastUpdated: DateTime.tryParse(data['updateAt'].toString()) ?? DateTime.now(),
     );
   }
 
@@ -67,8 +69,8 @@ class PropertyModel {
       'isOccupied': isOccupied,
       'location': location,
       'images': images,
-      'createdAt': Timestamp.fromDate(createdAt),
-      'lastUpdated': Timestamp.fromDate(lastUpdated),
+      'createdAt': createdAt.toIso8601String(),
+      'lastUpdated': createdAt.toIso8601String(),
     };
   }
 }

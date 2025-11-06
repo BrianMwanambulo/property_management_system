@@ -11,7 +11,8 @@ class MaintenanceModel {
   final String description;
   final String category; // 'plumbing', 'electrical', 'structural', 'other'
   final String priority; // 'low', 'medium', 'high', 'urgent'
-  final String status; // 'pending', 'assigned', 'in_progress', 'completed', 'cancelled'
+  final String
+  status; // 'pending', 'assigned', 'in_progress', 'completed', 'cancelled'
   final List<String> images;
   final String? assignedTo;
   final DateTime createdAt;
@@ -39,7 +40,7 @@ class MaintenanceModel {
     final data = doc.data() as Map<String, dynamic>;
     return MaintenanceModel(
       id: doc.id,
-      propertyOwnerId: data['propertyOwnerId']??"",
+      propertyOwnerId: data['propertyOwnerId'] ?? "",
       propertyId: data['propertyId'] ?? '',
       propertyNumber: data['propertyNumber'] ?? '',
       requesterUid: data['requesterUid'] ?? '',
@@ -51,8 +52,10 @@ class MaintenanceModel {
       status: data['status'] ?? 'pending',
       images: List<String>.from(data['images'] ?? []),
       assignedTo: data['assignedTo'],
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
-      completedAt: data['completedAt'] != null ? (data['completedAt'] as Timestamp).toDate() : null,
+      createdAt:
+          DateTime.tryParse(data['createdAt'].toString()) ?? DateTime.now(),
+      completedAt:
+          DateTime.tryParse(data['completedAt'].toString()) ?? DateTime.now(),
     );
   }
 
@@ -70,8 +73,8 @@ class MaintenanceModel {
       'status': status,
       'images': images,
       'assignedTo': assignedTo,
-      'createdAt': Timestamp.fromDate(createdAt),
-      'completedAt': completedAt != null ? Timestamp.fromDate(completedAt!) : null,
+      'createdAt': createdAt.toIso8601String(),
+      'completedAt': completedAt?.toIso8601String(),
     };
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:property_management_system/api/auth_service.dart';
+import 'package:property_management_system/api/sync_service.dart';
 import 'package:provider/provider.dart';
 import 'package:property_management_system/providers/auth_provider.dart';
 
@@ -13,11 +14,10 @@ class ProfileScreen extends StatelessWidget {
     final authProvider = Provider.of<AuthProvider>(context);
     final user = authProvider.user;
     final authService = AuthService();
+    final syncService = context.watch<SyncService>();
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Profile'),
-      ),
+      appBar: AppBar(title: const Text('Profile')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -61,27 +61,19 @@ class ProfileScreen extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    user?.role?.replaceAll('_', ' ').toUpperCase() ?? 'USER ROLE',
-                    style: const TextStyle(
-                      color: Colors.grey,
-                      fontSize: 16,
-                    ),
+                    user?.role?.replaceAll('_', ' ').toUpperCase() ??
+                        'USER ROLE',
+                    style: const TextStyle(color: Colors.grey, fontSize: 16),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     user?.email ?? 'user@example.com',
-                    style: const TextStyle(
-                      color: Colors.grey,
-                      fontSize: 14,
-                    ),
+                    style: const TextStyle(color: Colors.grey, fontSize: 14),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     user?.phone ?? 'No phone number',
-                    style: const TextStyle(
-                      color: Colors.grey,
-                      fontSize: 14,
-                    ),
+                    style: const TextStyle(color: Colors.grey, fontSize: 14),
                   ),
                 ],
               ),
@@ -110,25 +102,25 @@ class ProfileScreen extends StatelessWidget {
               title: 'Help & Support',
               onTap: () {},
             ),
-            _buildProfileOption(
-              icon: Icons.info,
-              title: 'About',
-              onTap: () {},
-            ),
+            _buildProfileOption(icon: Icons.info, title: 'About', onTap: () {}),
             _buildProfileOption(
               icon: Icons.logout,
               title: 'Logout',
               onTap: () async {
                 try {
-                  await authService.signOut();
+                  if (syncService.isOnline) {
+                    await authService.signOut();
+                  }
                   Navigator.pushReplacement(
                     context,
-                    MaterialPageRoute(builder: (context) => const LoginScreen()),
+                    MaterialPageRoute(
+                      builder: (context) => const LoginScreen(),
+                    ),
                   );
                 } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Logout failed: $e')),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('Logout failed: $e')));
                 }
               },
               textColor: Colors.red,
@@ -149,10 +141,7 @@ class ProfileScreen extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
         leading: Icon(icon, color: textColor ?? Colors.grey[700]),
-        title: Text(
-          title,
-          style: TextStyle(color: textColor),
-        ),
+        title: Text(title, style: TextStyle(color: textColor)),
         trailing: const Icon(Icons.arrow_forward_ios, size: 16),
         onTap: onTap,
       ),

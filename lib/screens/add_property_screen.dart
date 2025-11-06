@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:property_management_system/api/database_service.dart';
+import 'package:property_management_system/api/sync_service.dart';
 import 'package:property_management_system/models/user_model.dart';
 import 'package:provider/provider.dart';
 import 'package:property_management_system/models/property_model.dart';
@@ -20,11 +21,10 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
   List<UserModel> _tenants = [];
   UserModel? _selectedTenant;
   final _addressController = TextEditingController();
-  final _monthlyRentController = TextEditingController();
+  final _monthlyRentController = TextEditingController(text: "100");
   final _ownerNameController = TextEditingController();
 
-  String _selectedType = 'commercial';
-  bool _isOccupied = false;
+  String _selectedType = 'container';
   bool _isLoading = false;
 
   final List<XFile> _selectedImages = [];
@@ -90,11 +90,10 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
           address: _addressController.text.trim(),
           type: _selectedType,
           monthlyRent: double.parse(_monthlyRentController.text),
-          isOccupied: _isOccupied,
+          isOccupied: _selectedTenant != null,
           createdAt: DateTime.now(),
           lastUpdated: DateTime.now(),
         );
-
         // Add property to database
         await databaseService.addProperty(property);
 
@@ -136,11 +135,11 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // Property Images
-              const Text(
-                'Property Images',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-              ),
-              const SizedBox(height: 8),
+              // const Text(
+              //   'Property Images',
+              //   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+              // ),
+              // const SizedBox(height: 8),
               // SizedBox(
               //   height: 100,
               //   child: Row(
@@ -215,7 +214,8 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
               TextFormField(
                 controller: _nameController,
                 decoration: InputDecoration(
-                  labelText: 'Property Name',
+                  labelText: 'Property No.',
+                  hintText: "e.g CNT 232, SHOP 12",
                   prefixIcon: const Icon(Icons.business),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -223,18 +223,38 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                 ),
                 validator: (value) {
                   if (value == null || value.isEmpty) {
-                    return 'Please enter a property name';
+                    return 'Please enter a property number';
                   }
                   return null;
                 },
               ),
               const SizedBox(height: 16),
 
-              // Address
-              TextFormField(
-                controller: _addressController,
+              DropdownButtonFormField<String>(
+                items: [
+                  DropdownMenuItem(
+                    value: "Kasumbalesa Market",
+                    child: Text("Kasumbalesa Market"),
+                  ),
+                  DropdownMenuItem(value: "CBD", child: Text("CBD")),
+                  DropdownMenuItem(
+                    value: "Mine Market",
+                    child: Text("Mine Market"),
+                  ),
+                  DropdownMenuItem(
+                    value: "Lubengele Market",
+                    child: Text("Lubengele Market"),
+                  ),
+                  DropdownMenuItem(
+                    value: "Kakoso Market",
+                    child: Text("Kakoso Market"),
+                  ),
+                ],
+                onChanged: (value) {
+                  _addressController.text = value!;
+                },
                 decoration: InputDecoration(
-                  labelText: 'Address',
+                  labelText: 'Location',
                   prefixIcon: const Icon(Icons.location_on),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -247,16 +267,19 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   return null;
                 },
               ),
+
               const SizedBox(height: 16),
               DropdownButtonFormField<UserModel>(
-                validator: (value) {
-                  if (value == null) {
-                    return 'Please enter the owner name';
-                  }
-                  return null;
-                },
+                // validator: (value) {
+                //   if (value == null) {
+                //     return 'Please enter the owner name';
+                //   }
+                //   return null;
+                // },
                 decoration: InputDecoration(
-                  labelText: 'Tenant (Optional)',
+                  labelText: _tenants.isEmpty
+                      ? "No tenants available"
+                      : 'Tenant (Optional)',
                   prefixIcon: const Icon(Icons.person),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -284,18 +307,19 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                 ),
                 items: const [
                   DropdownMenuItem(
-                    value: 'commercial',
-                    child: Text('Commercial'),
+                    value: 'container',
+                    child: Text('Container'),
                   ),
-                  DropdownMenuItem(
-                    value: 'residential',
-                    child: Text('Residential'),
-                  ),
-                  DropdownMenuItem(value: 'mixed', child: Text('Mixed Use')),
+                  DropdownMenuItem(value: 'shop', child: Text('Shop')),
                 ],
                 onChanged: (value) {
                   setState(() {
                     _selectedType = value!;
+                    if (value == "shop") {
+                      _monthlyRentController.text = "650";
+                    } else {
+                      _monthlyRentController.text = "100";
+                    }
                   });
                 },
               ),
@@ -303,6 +327,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
 
               // Monthly Rent
               TextFormField(
+                readOnly: true,
                 controller: _monthlyRentController,
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
@@ -322,25 +347,7 @@ class _AddPropertyScreenState extends State<AddPropertyScreen> {
                   return null;
                 },
               ),
-              const SizedBox(height: 16),
-
-              // Occupancy Status
-              Row(
-                children: [
-                  const Text('Occupied', style: TextStyle(fontSize: 16)),
-                  const Spacer(),
-                  Switch(
-                    value: _isOccupied,
-                    onChanged: (value) {
-                      setState(() {
-                        _isOccupied = value;
-                      });
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-
+              SizedBox(height: 16),
               // Submit Button
               ElevatedButton(
                 onPressed: _isLoading ? null : _submitForm,

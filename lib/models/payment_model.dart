@@ -40,8 +40,8 @@ class PaymentModel {
       amount: (data['amount'] ?? 0).toDouble(),
       description: data['description'] ?? '',
       status: data['status'] ?? 'pending',
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
-      paidDate: (data['paidDate'] as Timestamp).toDate(),
+      createdAt: DateTime.tryParse(data['createdAt'].toString())??DateTime.now(),
+      paidDate: DateTime.tryParse(data['createdAt'].toString())??DateTime.now(),
     );
   }
 
@@ -55,8 +55,8 @@ class PaymentModel {
       'amount': amount,
       'description': description,
       'status': status,
-      'createdAt': Timestamp.fromDate(createdAt),
-      'paidDate': Timestamp.fromDate(paidDate),
+      'createdAt':createdAt.toIso8601String(),
+      'paidDate': paidDate.toIso8601String(),
     };
   }
 }

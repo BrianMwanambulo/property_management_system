@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:property_management_system/api/local_storage.dart';
+import 'package:property_management_system/api/sync_service.dart';
 
 import '../../providers/auth_provider.dart';
 import '../main_screen.dart';
 import 'login.dart';
-
 
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
@@ -32,14 +33,45 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
       try {
         final authProvider = Provider.of<AuthProvider>(context, listen: false);
+        final syncService = Provider.of<SyncService>(context, listen: false);
+
         final success = await authProvider.signUp(
           email: _emailController.text.trim(),
           password: _passwordController.text.trim(),
           name: _nameController.text.trim(),
+          role: _selectedRole ?? "tenant",
           phone: _phoneController.text.trim(),
         );
 
         if (success && mounted) {
+          // Save user data to local storage for offline access
+          final user = authProvider.user;
+          if (user != null) {
+            final userData = {
+              'uid': user.uid,
+              'email': user.email,
+              'name': user.name,
+              'phone': user.phone,
+              'role': user.role,
+              'createdAt': user.createdAt.toIso8601String(),
+            };
+            await SharedPreferencesService.saveUserData(userData);
+          }
+
+          // Save auth details for offline authentication
+          await SharedPreferencesService.saveAuthDetails({
+            'email': _emailController.text.trim(),
+            'password': _passwordController.text.trim(),
+          });
+
+          // If online, sync data from server
+          if (syncService.isOnline) {
+            await syncService.syncFromServer(
+              authProvider.user!.uid,
+              role: authProvider.user!.role,
+            );
+          }
+
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (context) => const MainScreen()),
@@ -173,7 +205,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   items: const [
                     DropdownMenuItem(
                       value: 'property_owner',
-                      child: Text('Property Owner'),
+                      child: Text('Administrator'),
                     ),
                     DropdownMenuItem(
                       value: 'tenant',
@@ -310,7 +342,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Property Owners: Manage your properties and track payments\n\nTenants: View your rental details and submit maintenance requests',
+                        'Administrator: Manage your properties and track payments\n\nTenants: View your rental details and submit maintenance requests',
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.blue[700], fontSize: 14),
                       ),

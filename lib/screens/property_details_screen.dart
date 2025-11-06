@@ -22,6 +22,7 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
   int _currentImageIndex = 0;
   List<UserModel> _tenants = [];
   UserModel? _selectedTenant;
+
   // Form controllers
   final _nameController = TextEditingController();
   final _addressController = TextEditingController();
@@ -51,7 +52,7 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
     _tenants = await DatabaseService().getAllTenants();
     if (widget.property.tenant != null) {
       _selectedTenant = _tenants.firstWhere(
-            (t) => t.uid == widget.property.tenant!.uid,
+        (t) => t.uid == widget.property.tenant!.uid,
       );
     }
     setState(() {
@@ -96,9 +97,9 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
 
       setState(() => _isEditing = false);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update property: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to update property: $e')));
     } finally {
       setState(() => _isLoading = false);
     }
@@ -109,7 +110,9 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Confirm Delete'),
-        content: const Text('Are you sure you want to delete this property? This action cannot be undone.'),
+        content: const Text(
+          'Are you sure you want to delete this property? This action cannot be undone.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -223,14 +226,25 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
             _buildInfoRow('Property Name', widget.property.name),
             _buildInfoRow('Address', widget.property.address),
             _buildInfoRow('Property Type', widget.property.type.toUpperCase()),
-            _buildInfoRow('Monthly Rent', 'K ${widget.property.monthlyRent.toStringAsFixed(2)}'),
-            _buildInfoRow('Tenant', widget.property.tenant?.name??"No tenant"),
+            _buildInfoRow(
+              'Monthly Rent',
+              'K ${widget.property.monthlyRent.toStringAsFixed(2)}',
+            ),
+            _buildInfoRow(
+              'Tenant',
+              widget.property.tenant?.name ?? "No tenant",
+            ),
             _buildInfoRow(
               'Status',
               widget.property.isOccupied ? 'Occupied' : 'Vacant',
-              statusColor: widget.property.isOccupied ? Colors.green : Colors.orange,
+              statusColor: widget.property.isOccupied
+                  ? Colors.green
+                  : Colors.orange,
             ),
-            _buildInfoRow('Added On', '${widget.property.createdAt.day}/${widget.property.createdAt.month}/${widget.property.createdAt.year}'),
+            _buildInfoRow(
+              'Added On',
+              '${widget.property.createdAt.day}/${widget.property.createdAt.month}/${widget.property.createdAt.year}',
+            ),
           ],
         ),
       ),
@@ -311,7 +325,9 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
                 return null;
               },
               decoration: InputDecoration(
-                labelText: 'Tenant (Optional)',
+                labelText: _tenants.isEmpty
+                    ? "No Tenants Available"
+                    : 'Tenant (Optional)',
                 prefixIcon: const Icon(Icons.person),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
@@ -322,6 +338,9 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
                   .toList(),
               onChanged: (e) {
                 _selectedTenant = e;
+                setState(() {
+                  _isOccupied = true;
+                });
               },
             ),
             const SizedBox(height: 16),
@@ -332,9 +351,8 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
                 border: OutlineInputBorder(),
               ),
               items: const [
-                DropdownMenuItem(value: 'commercial', child: Text('Commercial')),
-                DropdownMenuItem(value: 'residential', child: Text('Residential')),
-                DropdownMenuItem(value: 'mixed', child: Text('Mixed Use')),
+                DropdownMenuItem(value: 'container', child: Text('Container')),
+                DropdownMenuItem(value: 'shop', child: Text('Shop')),
               ],
               onChanged: (value) {
                 setState(() {
@@ -364,7 +382,8 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
   }
 
   Widget _buildActionButtons(AuthProvider authProvider) {
-    final isAuthorized = authProvider.user?.role == 'admin' ||
+    final isAuthorized =
+        authProvider.user?.role == 'admin' ||
         authProvider.user?.uid == widget.property.ownerUid;
 
     if (!isAuthorized) return const SizedBox();
@@ -381,7 +400,10 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
                   backgroundColor: const Color(0xFF1565C0),
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
-                child: const Text('Edit Property', style: TextStyle(color: Colors.white)),
+                child: const Text(
+                  'Edit Property',
+                  style: TextStyle(color: Colors.white),
+                ),
               ),
             ),
             const SizedBox(width: 16),
@@ -392,7 +414,10 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   side: const BorderSide(color: Colors.red),
                 ),
-                child: const Text('Delete', style: TextStyle(color: Colors.red)),
+                child: const Text(
+                  'Delete',
+                  style: TextStyle(color: Colors.red),
+                ),
               ),
             ),
           ] else ...[
@@ -405,20 +430,27 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
                 ),
                 child: _isLoading
                     ? const SizedBox(
-                  height: 20,
-                  width: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                  ),
-                )
-                    : const Text('Save Changes', style: TextStyle(color: Colors.white)),
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
+                        ),
+                      )
+                    : const Text(
+                        'Save Changes',
+                        style: TextStyle(color: Colors.white),
+                      ),
               ),
             ),
             const SizedBox(width: 16),
             Expanded(
               child: OutlinedButton(
-                onPressed: _isLoading ? null : () => setState(() => _isEditing = false),
+                onPressed: _isLoading
+                    ? null
+                    : () => setState(() => _isEditing = false),
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
@@ -441,29 +473,29 @@ class _PropertyDetailsScreenState extends State<PropertyDetailsScreen> {
         actions: _isEditing
             ? []
             : [
-          if (authProvider.user?.role == 'admin' ||
-              authProvider.user?.uid == widget.property.ownerUid)
-            IconButton(
-              icon: const Icon(Icons.edit),
-              onPressed: () => setState(() => _isEditing = true),
-            ),
-        ],
+                if (authProvider.user?.role == 'admin' ||
+                    authProvider.user?.uid == widget.property.ownerUid)
+                  IconButton(
+                    icon: const Icon(Icons.edit),
+                    onPressed: () => setState(() => _isEditing = true),
+                  ),
+              ],
       ),
       body: SafeArea(
         child: _isLoading
             ? const Center(child: CircularProgressIndicator())
             : SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              _buildImageGallery(),
-              const SizedBox(height: 24),
-              _isEditing ? _buildEditForm() : _buildPropertyInfo(),
-              const SizedBox(height: 16),
-              _buildActionButtons(authProvider),
-            ],
-          ),
-        ),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    // _buildImageGallery(),
+                    const SizedBox(height: 24),
+                    _isEditing ? _buildEditForm() : _buildPropertyInfo(),
+                    const SizedBox(height: 16),
+                    _buildActionButtons(authProvider),
+                  ],
+                ),
+              ),
       ),
     );
   }

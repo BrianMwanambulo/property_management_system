@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:property_management_system/widgets/offline-indicator.dart';
 import 'package:provider/provider.dart';
+import 'package:property_management_system/api/sync_service.dart';
 import 'package:property_management_system/providers/auth_provider.dart';
 import 'package:property_management_system/screens/payments_screen.dart';
 import 'package:property_management_system/screens/profile_screen.dart';
@@ -19,6 +21,35 @@ class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
 
   @override
+  void initState() {
+    super.initState();
+    _initializeSync();
+  }
+
+  Future<void> _initializeSync() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final syncService = Provider.of<SyncService>(context, listen: false);
+
+    // Connect auth provider with sync service
+    authProvider.setSyncService(syncService);
+
+    // Check connectivity
+    await syncService.checkConnectivity();
+
+    // Initial sync if online and user is logged in
+    if (syncService.isOnline && authProvider.user != null) {
+      try {
+        await syncService.syncFromServer(
+          authProvider.user!.uid,
+          role: authProvider.user!.role,
+        );
+      } catch (e) {
+        debugPrint('Initial sync failed: $e');
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
     final user = authProvider.user;
@@ -26,7 +57,6 @@ class _MainScreenState extends State<MainScreen> {
     final isPropertyOwner = user?.role == 'property_owner';
     final isTenant = user?.role == 'tenant';
 
-    // Define screens based on user role
     final List<Widget> _screens = [
       const DashboardScreen(),
       if (isAdmin || isPropertyOwner) const PropertiesScreen(),
@@ -54,14 +84,17 @@ class _MainScreenState extends State<MainScreen> {
         icon: Icon(Icons.build),
         label: 'Maintenance',
       ),
-      const BottomNavigationBarItem(
-        icon: Icon(Icons.person),
-        label: 'Profile',
-      ),
+      const BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
     ];
 
     return Scaffold(
-      body: _screens[_selectedIndex],
+      body: Column(
+        children: [
+          SizedBox(height: 20),
+          const OfflineIndicator(),
+          Expanded(child: _screens[_selectedIndex]),
+        ],
+      ),
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
         currentIndex: _selectedIndex,

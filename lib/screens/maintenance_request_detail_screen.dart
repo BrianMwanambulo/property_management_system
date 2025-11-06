@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import 'package:property_management_system/models/maintenance_model.dart';
 import 'package:property_management_system/providers/auth_provider.dart';
 import 'package:intl/intl.dart';
-import 'package:image_viewer/image_viewer.dart';
 
 class MaintenanceDetailScreen extends StatefulWidget {
   final MaintenanceModel maintenanceRequest;
@@ -138,10 +137,10 @@ class _MaintenanceDetailScreenState extends State<MaintenanceDetailScreen> {
               return GestureDetector(
                 onTap: () {
                   // Show image in full screen
-                  ImageViewer.showImageSlider(
-                    images: widget.maintenanceRequest.images,
-                    startingPosition: index,
-                  );
+                  // ImageViewer.showImageSlider(
+                  //   images: widget.maintenanceRequest.images,
+                  //   startingPosition: index,
+                  // );
                 },
                 child: Container(
                   width: 160,

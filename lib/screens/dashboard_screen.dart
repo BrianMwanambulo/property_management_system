@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:property_management_system/api/database_service.dart';
 import 'package:property_management_system/models/activity_model.dart';
+import 'package:property_management_system/models/user_model.dart';
 import 'package:provider/provider.dart';
 import 'package:property_management_system/models/property_model.dart';
 import 'package:property_management_system/models/payment_model.dart';
-import 'package:property_management_system/models/maintenance_model.dart';
 import 'package:property_management_system/providers/auth_provider.dart';
+import 'package:property_management_system/api/sync_service.dart';
 import 'package:intl/intl.dart';
+import 'package:property_management_system/api/local_storage.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -22,6 +24,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<ActivityModel> _recentActivities = [];
   bool _isLoading = true;
   bool _isPaying = false;
+  bool _isOffline = false;
 
   @override
   void initState() {
@@ -31,15 +34,114 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _loadDashboardData() async {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final syncService = Provider.of<SyncService>(context, listen: false);
     final databaseService = DatabaseService();
     final user = authProvider.user;
 
+    setState(() {
+      _isLoading = true;
+    });
+
     try {
-      if (user?.role == 'tenant') {
-        // For tenants, get their assigned property, payments, and maintenance requests
-        final properties = await databaseService.getAllPropertiesFuture();
+      // Check connectivity first
+      final isOnline = await syncService.checkConnectivity();
+      setState(() {
+        _isOffline = !isOnline;
+      });
+
+      if (isOnline) {
+        // Online mode - fetch fresh data
+        await _loadOnlineData(authProvider, databaseService, user);
+      } else {
+        // Offline mode - use cached data
+        await _loadOfflineData(authProvider, user);
+      }
+    } catch (e) {
+      debugPrint('Error loading dashboard data: $e');
+      // Fallback to offline data
+      await _loadOfflineData(authProvider, user);
+      setState(() {
+        _isOffline = true;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Offline mode: Using cached data')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _loadOnlineData(
+    AuthProvider authProvider,
+    DatabaseService databaseService,
+    UserModel? user,
+  ) async {
+    if (user?.role == 'tenant') {
+      // Load tenant data
+      final properties = await databaseService.getAllPropertiesFuture();
+      _tenantProperty = properties.firstWhere(
+        (property) => property.isOccupied && property.tenantId == user!.uid,
+        orElse: () => PropertyModel(
+          id: '',
+          name: 'No Property Assigned',
+          ownerUid: '',
+          ownerName: '',
+          address: '',
+          type: '',
+          monthlyRent: 0,
+          isOccupied: false,
+          createdAt: DateTime.now(),
+          lastUpdated: DateTime.now(),
+        ),
+      );
+
+      _recentPayments = await databaseService.getPaymentsByUserFuture(
+        user!.uid,
+      );
+    } else {
+      // Load admin/owner data
+      _stats = await databaseService.getDashboardStats(
+        authProvider.user!.uid,
+        isAdmin: user?.role == 'admin' || user?.role == "property_owner",
+      );
+      _recentActivities = await databaseService.getOwnerRecentActivities(
+        user!.uid,
+      );
+    }
+  }
+
+  Future<void> _loadOfflineData(
+    AuthProvider authProvider,
+    UserModel? user,
+  ) async {
+    if (user?.role == 'tenant') {
+      // Load tenant offline data
+      final offlineProperties = SharedPreferencesService.getProperties();
+      if (offlineProperties != null) {
+        final properties = offlineProperties.map((data) {
+          return PropertyModel(
+            id: data['id'] ?? '',
+            name: data['name'] ?? '',
+            ownerUid: data['ownerUid'] ?? '',
+            ownerName: data['ownerName'] ?? '',
+            tenantId: data['tenantId'],
+            address: data['address'] ?? '',
+            type: data['type'] ?? '',
+            monthlyRent: (data['monthlyRent'] ?? 0).toDouble(),
+            isOccupied: data['isOccupied'] ?? false,
+            images: List<String>.from(data['images'] ?? []),
+            createdAt: DateTime.parse(data['createdAt']),
+            lastUpdated: DateTime.parse(data['lastUpdated']),
+          );
+        }).toList();
+
         _tenantProperty = properties.firstWhere(
-              (property) => property.isOccupied && property.tenantId == user!.uid,
+          (property) => property.isOccupied && property.tenantId == user!.uid,
           orElse: () => PropertyModel(
             id: '',
             name: 'No Property Assigned',
@@ -53,20 +155,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
             lastUpdated: DateTime.now(),
           ),
         );
-
-        _recentPayments = await databaseService.getPaymentsByUserFuture(user!.uid);
-
-      } else {
-       _stats = await databaseService.getDashboardStats(authProvider.user!.uid);
-       _recentActivities = await databaseService.getOwnerRecentActivities(user!.uid);
-
       }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load dashboard data: $e')),
-      );
-    } finally {
-      setState(() => _isLoading = false);
+
+      // Load offline payments
+      final offlinePayments = SharedPreferencesService.getPayments();
+      if (offlinePayments != null) {
+        _recentPayments = offlinePayments
+            .map((data) {
+              return PaymentModel(
+                id: data['id'] ?? '',
+                propertyId: data['propertyId'] ?? '',
+                propertyOwnerId: data['propertyOwnerId'] ?? '',
+                propertyName: data['propertyName'] ?? '',
+                payerUid: data['payerUid'] ?? '',
+                payerName: data['payerName'] ?? '',
+                amount: (data['amount'] ?? 0).toDouble(),
+                description: data['description'] ?? '',
+                status: data['status'] ?? 'pending',
+                createdAt: DateTime.parse(data['createdAt']),
+                paidDate: DateTime.parse(data['paidDate']),
+              );
+            })
+            .where((payment) => payment.payerUid == user!.uid)
+            .toList();
+      }
+    } else {
+      // Load admin/owner offline data
+      _stats =
+          SharedPreferencesService.getDashboardStats() ??
+          {
+            'totalProperties': 0,
+            'pendingPayments': 0,
+            'monthlyRevenue': 0,
+            'activeMaintenanceRequests': 0,
+          };
+
+      // Load offline activities
+      final offlineActivities = SharedPreferencesService.getRecentActivities();
+      if (offlineActivities != null) {
+        _recentActivities = offlineActivities.map((data) {
+          return ActivityModel(
+            id: data['id'] ?? '',
+            type: data['type'] ?? '',
+            title: data['title'] ?? '',
+            subtitle: data['subtitle'] ?? '',
+            createdAt: DateTime.parse(data['createdAt']),
+            icon: Icons.info,
+            color: Colors.grey,
+          );
+        }).toList();
+      }
     }
   }
 
@@ -76,13 +214,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() => _isPaying = true);
 
     try {
-      final databaseService = DatabaseService();
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final syncService = Provider.of<SyncService>(context, listen: false);
       final user = authProvider.user;
 
-      // Create a new payment record
       final payment = PaymentModel(
-        id: '', // Will be generated by Firestore
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
         propertyId: _tenantProperty!.id,
         propertyOwnerId: _tenantProperty!.ownerUid,
         propertyName: _tenantProperty!.name,
@@ -90,39 +227,71 @@ class _DashboardScreenState extends State<DashboardScreen> {
         payerName: user.name,
         amount: _tenantProperty!.monthlyRent,
         description: 'Monthly Rent Payment',
-        status: 'completed', // Mark as completed for demo
+        status: 'completed',
         createdAt: DateTime.now(),
         paidDate: DateTime.now(),
       );
 
-      await databaseService.addPayment(payment);
+      if (_isOffline) {
+        // Queue payment for sync when online
+        await syncService.queueOperation(
+          type: 'payment',
+          operation: 'add',
+          data: payment.toFirestore(),
+        );
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Payment successful!')),
-      );
+        // Update local state immediately
+        setState(() {
+          _recentPayments.insert(0, payment);
+        });
 
-      // Refresh the data
-      _loadDashboardData();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Payment queued for sync when online!')),
+        );
+      } else {
+        // Online payment
+        final databaseService = DatabaseService();
+        await databaseService.addPayment(payment);
+
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Payment successful!')));
+
+        _loadDashboardData(); // Reload to get updated data
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Payment failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Payment failed: $e')));
     } finally {
-      setState(() => _isPaying = false);
+      if (mounted) {
+        setState(() => _isPaying = false);
+      }
     }
+  }
+
+  void _refreshData() {
+    _loadDashboardData();
   }
 
   Widget _buildTenantDashboard() {
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
+    final now = DateTime.now();
+
+    bool hasPaid = _recentPayments.any(
+      (payment) =>
+          payment.paidDate.month == now.month &&
+          payment.paidDate.year == now.year,
+    );
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Welcome Card
+          // Welcome Card with offline indicator
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(20),
@@ -137,14 +306,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-
-                const Text(
-                  'Welcome, Tenant',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Welcome, Tenant',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (_isOffline)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.orange[100],
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.cloud_off,
+                              size: 14,
+                              color: Colors.orange[800],
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Offline',
+                              style: TextStyle(
+                                color: Colors.orange[800],
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -185,7 +387,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     _buildPropertyInfo(
                       'Status',
                       _tenantProperty!.isOccupied ? 'Occupied' : 'Vacant',
-                      statusColor: _tenantProperty!.isOccupied ? Colors.green : Colors.orange,
+                      statusColor: _tenantProperty!.isOccupied
+                          ? Colors.green
+                          : Colors.orange,
                     ),
                   ],
                 ),
@@ -203,61 +407,96 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
           // Payment Section
           if (_tenantProperty != null && _tenantProperty!.id.isNotEmpty)
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Make Payment',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
+            hasPaid
+                ? Container(
+                    decoration: BoxDecoration(
+                      color: Colors.green[100],
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Monthly Rent:',
-                      style: TextStyle(fontSize: 16),
-                    ),
-                    Text(
-                      'K ${_tenantProperty!.monthlyRent.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF1565C0),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Due Date: 5th of each month',
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: _isPaying ? null : _makePayment,
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 50),
-                      ),
-                      child: _isPaying
-                          ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    child: Row(
+                      spacing: 10,
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            Icons.check_circle,
+                            color: Colors.green,
+                            size: 20,
+                          ),
                         ),
-                      )
-                          : const Text(
-                        'Pay Now',
-                        style: TextStyle(fontSize: 16),
+                        Text(
+                          "Payment made for this month",
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ],
+                    ),
+                  )
+                : Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Make Payment',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Monthly Rent:',
+                            style: TextStyle(fontSize: 16),
+                          ),
+                          Text(
+                            'K ${_tenantProperty!.monthlyRent.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF1565C0),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Due Date: 5th of each month',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                          const SizedBox(height: 24),
+
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: _isPaying ? null : _makePayment,
+                              child: _isPaying
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                              Colors.white,
+                                            ),
+                                      ),
+                                    )
+                                  : Text(
+                                      _isOffline
+                                          ? 'Go online to pay'
+                                          : 'Pay Now',
+                                      style: const TextStyle(fontSize: 16),
+                                    ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
-              ),
-            ),
+                  ),
 
           const SizedBox(height: 24),
 
@@ -268,22 +507,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Recent Payments',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  Row(
+                    children: [
+                      const Text(
+                        'Recent Payments',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      if (_isOffline) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.orange[100],
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            'Cached',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.orange[800],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 16),
                   _recentPayments.isEmpty
                       ? const Text('No recent payments')
                       : Column(
-                    children: _recentPayments
-                        .take(3)
-                        .map((payment) => _buildPaymentItem(payment))
-                        .toList(),
-                  ),
+                          children: _recentPayments
+                              .take(3)
+                              .map((payment) => _buildPaymentItem(payment))
+                              .toList(),
+                        ),
                 ],
               ),
             ),
@@ -292,64 +556,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
   }
-
-  Widget _buildPropertyInfo(String label, String value, {Color? statusColor}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 120,
-            child: Text(
-              label,
-              style: const TextStyle(fontWeight: FontWeight.w500),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(
-                color: statusColor,
-                fontWeight: statusColor != null ? FontWeight.w500 : null,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPaymentItem(PaymentModel payment) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          color: payment.status == 'completed' ? Colors.green[100] : Colors.orange[100],
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Icon(
-          payment.status == 'completed' ? Icons.check_circle : Icons.pending,
-          color: payment.status == 'completed' ? Colors.green : Colors.orange,
-          size: 20,
-        ),
-      ),
-      title: Text('K ${payment.amount.toStringAsFixed(2)}'),
-      subtitle: Text(DateFormat('MMM dd, yyyy').format(payment.createdAt)),
-      trailing: Text(
-        payment.status.toUpperCase(),
-        style: TextStyle(
-          color: payment.status == 'completed' ? Colors.green : Colors.orange,
-          fontWeight: FontWeight.w500,
-        ),
-      ),
-    );
-  }
-
-
 
   @override
   Widget build(BuildContext context) {
@@ -360,6 +566,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         title: const Text('Dashboard'),
         actions: [
+          if (_isOffline)
+            IconButton(
+              icon: const Icon(Icons.cloud_off, color: Colors.orange),
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('You are currently offline')),
+                );
+              },
+            ),
           IconButton(
             icon: const Icon(Icons.notifications),
             onPressed: () {
@@ -368,7 +583,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _loadDashboardData,
+            onPressed: _isLoading ? null : _refreshData,
           ),
         ],
       ),
@@ -376,119 +591,256 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // Keep the original admin dashboard as before
   Widget _buildAdminDashboard() {
-    // Your original dashboard implementation here
-    return _isLoading? Center(child: CircularProgressIndicator(),) : SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Welcome Card
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF1565C0), Color(0xFF1976D2)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(12),
-            ),
+    return _isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Welcome, John Doe',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
+                // Welcome Card with offline indicator
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF1565C0), Color(0xFF1976D2)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Welcome, Admin',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          if (_isOffline)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.orange[100],
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.cloud_off,
+                                    size: 14,
+                                    color: Colors.orange[800],
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Offline',
+                                    style: TextStyle(
+                                      color: Colors.orange[800],
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Chililabombwe Municipal Council',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.9),
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  'Chililabombwe Municipal Council',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.9),
-                    fontSize: 16,
+                const SizedBox(height: 24),
+
+                // Stats Grid
+                GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
+                  childAspectRatio: 1.3,
+                  children: [
+                    _buildStatCard(
+                      title: 'Total Properties',
+                      value: '${_stats['totalProperties'] ?? 0}',
+                      icon: Icons.business,
+                      color: Colors.blue,
+                    ),
+                    _buildStatCard(
+                      title: 'Pending Payments',
+                      value: '${_stats['pendingPayments'] ?? 0}',
+                      icon: Icons.payment,
+                      color: Colors.orange,
+                    ),
+                    _buildStatCard(
+                      title: 'This Month Revenue',
+                      value: 'K ${_stats['monthlyRevenue'] ?? 0}',
+                      icon: Icons.trending_up,
+                      color: Colors.green,
+                    ),
+                    _buildStatCard(
+                      title: 'Maintenance Requests',
+                      value: '${_stats['activeMaintenanceRequests'] ?? 0}',
+                      icon: Icons.build,
+                      color: Colors.red,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+
+                // Recent Activities
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Text(
+                              'Recent Activities',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            if (_isOffline) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange[100],
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  'Cached',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.orange[800],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        _recentActivities.isEmpty
+                            ? const Text('No recent activities')
+                            : Column(
+                                children: _recentActivities
+                                    .take(5)
+                                    .map(
+                                      (activity) =>
+                                          _buildActivityItem(activity),
+                                    )
+                                    .toList(),
+                              ),
+                      ],
+                    ),
                   ),
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 24),
+          );
+  }
 
-          // Stats Grid
-          GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 2,
-            crossAxisSpacing: 16,
-            mainAxisSpacing: 16,
-            childAspectRatio: 1.5,
-            children: [
-              _buildStatCard(
-                title: 'Total Properties',
-                value: '${_stats['totalProperties'] ?? 0}',
-                icon: Icons.business,
-                color: Colors.blue,
-              ),
-              _buildStatCard(
-                title: 'Pending Payments',
-                value: '${_stats['pendingPayments'] ?? 0}',
-                icon: Icons.payment,
-                color: Colors.orange,
-              ),
-                _buildStatCard(
-                  title: 'This Month Revenue',
-                  value: 'K ${_stats['monthlyRevenue'] ?? 0}',
-                  icon: Icons.trending_up,
-                  color: Colors.green,
-                ),
-              _buildStatCard(
-                title: 'Maintenance Requests',
-                value: '${_stats['activeMaintenanceRequests'] ?? 0}',
-                icon: Icons.build,
-                color: Colors.purple,
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 24),
-
-          // Recent Activities
-          const Text(
-            'Recent Activities',
+  Widget _buildPropertyInfo(String label, String value, {Color? statusColor}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Text('$label: ', style: const TextStyle(fontWeight: FontWeight.w500)),
+          Text(
+            value,
             style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
+              color: statusColor ?? Colors.black,
+              fontWeight: statusColor != null
+                  ? FontWeight.bold
+                  : FontWeight.normal,
             ),
           ),
-          const SizedBox(height: 16),
-          Card(
-            child: _recentActivities.isEmpty
-                ? const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('No recent activities found.'),
-            )
-                : ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: _recentActivities.length,
-              itemBuilder: (context, index) {
-                final activity = _recentActivities[index];
-                return _buildActivityItem(
-                  icon: activity.icon,
-                  title: activity.title,
-                  subtitle: activity.subtitle,
-                  time: DateFormat('MMM dd, yyyy – HH:mm').format(activity.createdAt),
-                  color: activity.color,
-                );
-              },
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaymentItem(PaymentModel payment) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: payment.status == 'completed'
+                  ? Colors.green[100]
+                  : Colors.orange[100],
+              borderRadius: BorderRadius.circular(8),
             ),
-          )
+            child: Icon(
+              payment.status == 'completed'
+                  ? Icons.check_circle
+                  : Icons.pending,
+              color: payment.status == 'completed'
+                  ? Colors.green
+                  : Colors.orange,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  payment.description,
+                  style: const TextStyle(fontWeight: FontWeight.w500),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  DateFormat('MMM dd, yyyy').format(payment.createdAt),
+                  style: const TextStyle(color: Colors.grey, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            'K ${payment.amount.toStringAsFixed(2)}',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: payment.status == 'completed'
+                  ? Colors.green
+                  : Colors.orange,
+            ),
+          ),
         ],
       ),
     );
@@ -504,35 +856,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Icon(icon, color: color, size: 24),
-                Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: color.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-              ],
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, color: color, size: 24),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             Text(
               value,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
+            const SizedBox(height: 4),
             Text(
               title,
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey[600],
-              ),
+              style: const TextStyle(color: Colors.grey, fontSize: 12),
+              textAlign: TextAlign.center,
             ),
           ],
         ),
@@ -540,30 +883,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildActivityItem({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required String time,
-    required Color color,
-  }) {
-    return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Icon(icon, color: color, size: 20),
+  Widget _buildActivityItem(ActivityModel activity) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(8),
       ),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
-      subtitle: Text(subtitle),
-      trailing: Text(
-        time,
-        style: TextStyle(
-          fontSize: 12,
-          color: Colors.grey[600],
-        ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.blue[100],
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(Icons.notifications, color: Colors.blue[600], size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  activity.title,
+                  style: const TextStyle(fontWeight: FontWeight.w500),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  DateFormat('MMM dd, yyyy - HH:mm').format(activity.createdAt),
+                  style: const TextStyle(color: Colors.grey, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
