@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:property_management_system/generated/assets.dart';
 import 'package:provider/provider.dart';
 import 'package:property_management_system/api/local_storage.dart';
 import 'package:property_management_system/api/sync_service.dart';
@@ -103,19 +104,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 40),
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1565C0),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: const Icon(
-                    Icons.business,
-                    size: 40,
-                    color: Colors.white,
-                  ),
-                ),
+                Image.asset(Assets.assetsLogo,width: 150,height: 150,),
                 const SizedBox(height: 24),
                 const Text(
                   'Create Account',

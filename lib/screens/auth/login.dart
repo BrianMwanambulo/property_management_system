@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 import 'package:flutter/material.dart';
 import 'package:property_management_system/api/local_storage.dart';
 import 'package:property_management_system/api/sync_service.dart';
+import 'package:property_management_system/generated/assets.dart';
 import 'package:property_management_system/models/user_model.dart';
 import 'package:property_management_system/providers/auth_provider.dart';
 import 'package:property_management_system/screens/auth/sign_up.dart';
@@ -93,19 +94,7 @@ class _LoginScreenState extends State<LoginScreen> {
               children: [
                 OfflineIndicator(),
                 const SizedBox(height: 60),
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1565C0),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: const Icon(
-                    Icons.business,
-                    size: 40,
-                    color: Colors.white,
-                  ),
-                ),
+                Image.asset(Assets.assetsLogo,width: 150,height: 150,),
                 const SizedBox(height: 24),
                 const Text(
                   'Welcome Back',
